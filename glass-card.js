@@ -1,50 +1,102 @@
 const video = document.querySelector('#bg-video');
 const card = document.querySelector('[data-glass-card]');
-const duplicate = document.querySelector('#dup-video-container');
 const canvas = document.querySelector('#dup-image');
-const context = canvas.getContext('2d', { alpha: false });
+const context = canvas.getContext('2d', {
+  alpha: false,
+  desynchronized: true,
+});
 
-const DUP_PIXEL_RATIO = 1;
+const MAX_GLASS_FPS = 30;
+const GLASS_FRAME_INTERVAL = 1000 / MAX_GLASS_FPS;
+const GLASS_OVERSCAN = 96;
+let lastGlassPaint = -Infinity;
 
-function syncGlassFrame() {
-  requestAnimationFrame(syncGlassFrame);
-
-  const rect = card.getBoundingClientRect();
-  if (!rect.width || !rect.height || !video.videoWidth || !video.videoHeight) {
+function paintGlassFrame(now = performance.now()) {
+  if (
+    document.hidden ||
+    now - lastGlassPaint < GLASS_FRAME_INTERVAL ||
+    !video.videoWidth ||
+    !video.videoHeight
+  ) {
     return;
   }
 
-  const vw = document.documentElement.clientWidth;
-  const vh = document.documentElement.clientHeight;
-
-  // Viewport sizing is deliberate: channel-shift bands stay beyond the card,
-  // leaving only clean refraction inside its clipped, rounded silhouette.
-  duplicate.style.left = -rect.left + 'px';
-  duplicate.style.top = -rect.top + 'px';
-  duplicate.style.width = vw + 'px';
-  duplicate.style.height = vh + 'px';
-
-  // The duplicate stays at 1x on retina. SVG filter cost scales with pixel
-  // count, while the soft refraction gains nothing useful from 4x the work.
-  const w = Math.max(1, Math.round(vw * DUP_PIXEL_RATIO));
-  const h = Math.max(1, Math.round(vh * DUP_PIXEL_RATIO));
-
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
+  const rect = card.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return;
   }
 
-  const cover = Math.max(vw / video.videoWidth, vh / video.videoHeight);
-  const sw = vw / cover;
-  const sh = vh / cover;
-  const sx = (video.videoWidth - sw) / 2;
-  const sy = (video.videoHeight - sh) / 2;
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+  const cover = Math.max(
+    viewportWidth / video.videoWidth,
+    viewportHeight / video.videoHeight,
+  );
+  const renderedWidth = video.videoWidth * cover;
+  const renderedHeight = video.videoHeight * cover;
+  const offsetX = (viewportWidth - renderedWidth) / 2;
+  const offsetY = (viewportHeight - renderedHeight) / 2;
+
+  // Copy only the piece of the background that sits behind the card. The old
+  // implementation filtered a viewport-sized canvas on every animation frame.
+  const sourceX = (rect.left - GLASS_OVERSCAN - offsetX) / cover;
+  const sourceY = (rect.top - GLASS_OVERSCAN - offsetY) / cover;
+  const sourceWidth = (rect.width + GLASS_OVERSCAN * 2) / cover;
+  const sourceHeight = (rect.height + GLASS_OVERSCAN * 2) / cover;
+  const width = Math.max(1, Math.round(rect.width + GLASS_OVERSCAN * 2));
+  const height = Math.max(1, Math.round(rect.height + GLASS_OVERSCAN * 2));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
 
   try {
-    context.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+    context.drawImage(
+      video,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      width,
+      height,
+    );
+    lastGlassPaint = now;
   } catch {
-    // The browser can briefly expose metadata before a frame is decodable.
+    // Metadata can be ready a fraction before the first drawable frame.
   }
 }
 
-requestAnimationFrame(syncGlassFrame);
+if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+  const onVideoFrame = (now) => {
+    paintGlassFrame(now);
+    video.requestVideoFrameCallback(onVideoFrame);
+  };
+
+  video.requestVideoFrameCallback(onVideoFrame);
+} else {
+  const onAnimationFrame = (now) => {
+    paintGlassFrame(now);
+    requestAnimationFrame(onAnimationFrame);
+  };
+
+  requestAnimationFrame(onAnimationFrame);
+}
+
+window.addEventListener(
+  'resize',
+  () => {
+    lastGlassPaint = -Infinity;
+    paintGlassFrame();
+  },
+  { passive: true },
+);
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    lastGlassPaint = -Infinity;
+    paintGlassFrame();
+  }
+});
