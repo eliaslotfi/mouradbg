@@ -16,6 +16,7 @@ const mimeTypes = new Map([
   ['.jpg', 'image/jpeg'],
   ['.svg', 'image/svg+xml'],
   ['.mp4', 'video/mp4'],
+  ['.webm', 'video/webm'],
 ]);
 
 function notFound(response) {

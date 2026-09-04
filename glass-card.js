@@ -6,7 +6,7 @@ const context = canvas.getContext('2d', {
   desynchronized: true,
 });
 
-const MAX_GLASS_FPS = 60;
+const MAX_GLASS_FPS = 24;
 const GLASS_FRAME_INTERVAL = 1000 / MAX_GLASS_FPS;
 const GLASS_OVERSCAN = 96;
 let lastGlassPaint = -Infinity;
